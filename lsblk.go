@@ -2,14 +2,17 @@ package lsblk
 
 import (
 	"encoding/json"
-	"fmt"
 	"os/exec"
+
+	"github.com/wesovilabs/koazee"
 )
 
+// Lsblk main JSON struct to capture the output of `lsblk`
 type Lsblk struct {
 	Blockdevices []Blockdevice
 }
 
+// Blockdevice JSON strruct with details for every device
 type Blockdevice struct {
 	Name         string // device name
 	Kname        string // internal kernel device name
@@ -100,28 +103,59 @@ func check(e error) {
 // 	return nil
 // }
 
-func (b Blockdevice) isRunning() bool {
-	if b.State == "running" {
+// HasPartitions .
+func (b Blockdevice) HasPartitions() bool {
+	if len(b.Children) > 0 {
 		return true
-	} else {
-		return false
 	}
+	return false
 }
 
-func listBlockdevices() {
+// IsRunning .
+func (b Blockdevice) IsRunning() bool {
+	if b.State == "running" {
+		return true
+	}
+	return false
+}
+
+// IsMounted .
+func (b Blockdevice) IsMounted() bool {
+	if b.Mountpoint != "" {
+		return true
+	}
+	return false
+}
+
+// MountedPartitions .
+func MountedPartitions() []Blockdevice {
+	lsblk := GetLsblk()
+	var partitions []Blockdevice
+	var mPartitions []Blockdevice
+
+	koazee.StreamOf(lsblk.Blockdevices).
+		Filter(func(b Blockdevice) bool { return b.HasPartitions() }).
+		ForEach(func(p Blockdevice) {
+			for _, c := range p.Children {
+				partitions = append(partitions, c)
+			}
+		}).Do()
+
+	koazee.StreamOf(partitions).
+		Filter(func(b Blockdevice) bool { return b.IsMounted() }).
+		ForEach(func(p Blockdevice) {
+			mPartitions = append(mPartitions, p)
+		}).Do()
+
+	partitions = nil
+	return mPartitions
+}
+
+// GetLsblk .
+func GetLsblk() Lsblk {
 	var lsblk Lsblk
 	lsblkj, err := exec.Command("lsblk", "-pabOJ").Output()
 	check(err)
 	err = json.Unmarshal(lsblkj, &lsblk)
-	for _, bdev := range lsblk.Blockdevices {
-		fmt.Printf("\nisRunning: %t\n", bdev.isRunning())
-		if len(bdev.Children) != 0 {
-			fmt.Println(bdev.Name + " has children:")
-			for _, cdev := range bdev.Children {
-				fmt.Println(">>", cdev.Name, cdev.Type, cdev.Mountpoint)
-			}
-		} else {
-			fmt.Println(bdev.Name, bdev.Type, bdev.Mountpoint)
-		}
-	}
+	return lsblk
 }

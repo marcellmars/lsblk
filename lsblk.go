@@ -133,6 +133,18 @@ func MountedPartitions() []Blockdevice {
 	var partitions []Blockdevice
 	var mPartitions []Blockdevice
 
+	// using go-funk utilities
+	// blockdevices := funk.Filter(lsblk.Blockdevices, func(b Blockdevice) bool { return b.HasPartitions() }).([]Blockdevice)
+
+	// funk.ForEach(blockdevices, func(b Blockdevice) {
+	// 	for _, c := range b.Children {
+	// 		partitions = append(partitions, c)
+	// 	}
+	// })
+
+	// mPartitions = funk.Filter(partitions, func(p Blockdevice) bool { return p.IsMounted() }).([]Blockdevice)
+
+	// using koazee streams
 	koazee.StreamOf(lsblk.Blockdevices).
 		Filter(func(b Blockdevice) bool { return b.HasPartitions() }).
 		ForEach(func(p Blockdevice) {

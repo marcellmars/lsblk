@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
-
-	"github.com/tidwall/gjson"
 )
 
 // Lsblk main JSON struct to capture the output of `lsblk`
@@ -66,7 +63,7 @@ type Blockdevice struct {
 	Wwn          string // unique storage identifier
 	Hctl         string // Host:Channel:Target:Lun for SCSI
 	Tran         string // device transport type e.g. usb, nvme
-	Subsystems   string // de-dulicated chain of subsystems e.g. block, block:scsi:usb:pci, block:nvme:pci
+	Subsystems   string // de-duplicated chain of subsystems e.g. block, block:scsi:usb:pci, block:nvme:pci
 	Rev          string // device revision
 	Vendor       string // device vendor
 	Zoned        string // zone model
@@ -80,30 +77,35 @@ func check(e error) {
 	}
 }
 
-// if it makes sense to change the JSON item into something else
-// in `type Blockdevice struct` the custom item should get its
-// respective type. in this case it changes from string to bool
-//
-// func (u *Blockdevice) UnmarshalJSON(data []byte) error {
-// 	type Alias Blockdevice
-// 	aux := &struct {
-// 		State string
-// 		*Alias
-// 	}{
-// 		Alias: (*Alias)(u),
-// 	}
+// ByteCountSI .
+func ByteCountSI(b int64) string {
+	const unit = 1000
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB",
+		float64(b)/float64(div), "kMGTPE"[exp])
+}
 
-// 	if err := json.Unmarshal(data, &aux); err != nil {
-// 		return err
-// 	}
-
-// 	if aux.State == "running" {
-// 		u.State = true
-// 	} else {
-// 		u.State = false
-// 	}
-// 	return nil
-// }
+// ByteCountIEC .
+func ByteCountIEC(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB",
+		float64(b)/float64(div), "KMGTPE"[exp])
+}
 
 // HasPartitions .
 func (b Blockdevice) HasPartitions() bool {
@@ -129,89 +131,30 @@ func (b Blockdevice) IsMounted() bool {
 	return false
 }
 
-// MountedPartitions .
-func MountedPartitions() []Blockdevice {
-	lsblk := GetLsblk()
-	var partitions []Blockdevice
-	// var mPartitions []Blockdevice
-
-	// using go-funk utilities
-	// blockdevices := funk.Filter(lsblk.Blockdevices, func(b Blockdevice) bool { return b.HasPartitions() }).([]Blockdevice)
-
-	// funk.ForEach(blockdevices, func(b Blockdevice) {
-	// 	for _, c := range b.Children {
-	// 		if c.IsMounted() {
-	// 			partitions = append(partitions, c)
-	// 		}
-	// 	}
-	// })
-
-	// mPartitions = funk.Filter(partitions, func(p Blockdevice) bool { return p.IsMounted() }).([]Blockdevice)
-
-	// using koazee streams
-	// koazee.StreamOf(lsblk.Blockdevices).
-	// 	Filter(func(b Blockdevice) bool { return b.HasPartitions() }).
-	// 	ForEach(func(p Blockdevice) {
-	// 		for _, c := range p.Children {
-	// 			if c.IsMounted() {
-	// 				partitions = append(partitions, c)
-	// 			}
-	// 		}
-	// 	}).Do()
-
-	// using plain go's for/if
-	for _, b := range lsblk.Blockdevices {
-		if b.HasPartitions() {
-			for _, p := range b.Children {
-				if p.IsMounted() {
-					partitions = append(partitions, p)
-				}
-			}
-		}
-	}
-
-	return partitions
-}
-
-// HasChildren .
-func HasChildren(g []byte, el string) bool {
-	if len(gjson.GetBytes(g, el+".#.name").Array()) > 0 {
+// IsUsbTran .
+func (b Blockdevice) IsUsbTran() bool {
+	if b.Tran == "usb" {
 		return true
 	}
 	return false
 }
 
-// GmountedPartitions .
-func GmountedPartitions() {
-	g := GetLsblkOutput()
-	el := ".children|@flatten"
-	n := 0
-	for {
-		if HasChildren(g, fmt.Sprintf("blockdevices.#%s", el)) {
-			el = el + ".#.children|@flatten"
-		} else {
-			fmt.Printf("Final el: %s\n", strings.TrimSuffix(el, ".#.children|@flatten"))
-			n = strings.Count(el, ".#.children|@flatten")
-			break
+// MountedPartitions .
+func MountedPartitions() []Blockdevice {
+	lsblk := GetLsblk()
+	var partitions []Blockdevice
+
+	for _, b := range lsblk.Blockdevices {
+		if b.IsUsbTran() {
+			fmt.Println(b.Name, b.Fstype, b.Rm, b.Hotplug)
+			if b.HasPartitions() {
+				for _, p := range b.Children {
+					partitions = append(partitions, p)
+				}
+			}
 		}
 	}
-
-	if n == 0 {
-		fmt.Println("What if no children?")
-	}
-
-	fmt.Println("~~~~~~~~~~~~~~~~~~~~~\n")
-	el = ".children.#"
-	for n > -1 {
-		ele := fmt.Sprintf("blockdevices.#%s.children", strings.Repeat(el, n))
-		r := gjson.GetBytes(g, ele)
-		fmt.Println(n, "**********************************************\n")
-		rel := strings.Repeat("#.", n+2)
-		fmt.Println(r.Get(fmt.Sprintf("%sname|@flatten", rel)))
-		fmt.Println(r.Get(fmt.Sprintf("%smountpoint|@flatten", rel)))
-		fmt.Println("**********************************************\n")
-		n = n - 1
-	}
+	return partitions
 }
 
 // GetLsblk .

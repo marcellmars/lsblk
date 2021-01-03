@@ -2,9 +2,11 @@ package lsblk
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
+	"strings"
 
-	"github.com/wesovilabs/koazee"
+	"github.com/tidwall/gjson"
 )
 
 // Lsblk main JSON struct to capture the output of `lsblk`
@@ -131,43 +133,99 @@ func (b Blockdevice) IsMounted() bool {
 func MountedPartitions() []Blockdevice {
 	lsblk := GetLsblk()
 	var partitions []Blockdevice
-	var mPartitions []Blockdevice
+	// var mPartitions []Blockdevice
 
 	// using go-funk utilities
 	// blockdevices := funk.Filter(lsblk.Blockdevices, func(b Blockdevice) bool { return b.HasPartitions() }).([]Blockdevice)
 
 	// funk.ForEach(blockdevices, func(b Blockdevice) {
 	// 	for _, c := range b.Children {
-	// 		partitions = append(partitions, c)
+	// 		if c.IsMounted() {
+	// 			partitions = append(partitions, c)
+	// 		}
 	// 	}
 	// })
 
 	// mPartitions = funk.Filter(partitions, func(p Blockdevice) bool { return p.IsMounted() }).([]Blockdevice)
 
 	// using koazee streams
-	koazee.StreamOf(lsblk.Blockdevices).
-		Filter(func(b Blockdevice) bool { return b.HasPartitions() }).
-		ForEach(func(p Blockdevice) {
-			for _, c := range p.Children {
-				partitions = append(partitions, c)
+	// koazee.StreamOf(lsblk.Blockdevices).
+	// 	Filter(func(b Blockdevice) bool { return b.HasPartitions() }).
+	// 	ForEach(func(p Blockdevice) {
+	// 		for _, c := range p.Children {
+	// 			if c.IsMounted() {
+	// 				partitions = append(partitions, c)
+	// 			}
+	// 		}
+	// 	}).Do()
+
+	// using plain go's for/if
+	for _, b := range lsblk.Blockdevices {
+		if b.HasPartitions() {
+			for _, p := range b.Children {
+				if p.IsMounted() {
+					partitions = append(partitions, p)
+				}
 			}
-		}).Do()
+		}
+	}
 
-	koazee.StreamOf(partitions).
-		Filter(func(b Blockdevice) bool { return b.IsMounted() }).
-		ForEach(func(p Blockdevice) {
-			mPartitions = append(mPartitions, p)
-		}).Do()
+	return partitions
+}
 
-	partitions = nil
-	return mPartitions
+// HasChildren .
+func HasChildren(g []byte, el string) bool {
+	if len(gjson.GetBytes(g, el+".#.name").Array()) > 0 {
+		return true
+	}
+	return false
+}
+
+// GmountedPartitions .
+func GmountedPartitions() {
+	g := GetLsblkOutput()
+	el := ".children|@flatten"
+	n := 0
+	for {
+		if HasChildren(g, fmt.Sprintf("blockdevices.#%s", el)) {
+			el = el + ".#.children|@flatten"
+		} else {
+			fmt.Printf("Final el: %s\n", strings.TrimSuffix(el, ".#.children|@flatten"))
+			n = strings.Count(el, ".#.children|@flatten")
+			break
+		}
+	}
+
+	if n == 0 {
+		fmt.Println("What if no children?")
+	}
+
+	fmt.Println("~~~~~~~~~~~~~~~~~~~~~\n")
+	el = ".children.#"
+	for n > -1 {
+		ele := fmt.Sprintf("blockdevices.#%s.children", strings.Repeat(el, n))
+		r := gjson.GetBytes(g, ele)
+		fmt.Println(n, "**********************************************\n")
+		rel := strings.Repeat("#.", n+2)
+		fmt.Println(r.Get(fmt.Sprintf("%sname|@flatten", rel)))
+		fmt.Println(r.Get(fmt.Sprintf("%smountpoint|@flatten", rel)))
+		fmt.Println("**********************************************\n")
+		n = n - 1
+	}
 }
 
 // GetLsblk .
 func GetLsblk() Lsblk {
 	var lsblk Lsblk
+	lsblkj := GetLsblkOutput()
+	err := json.Unmarshal(lsblkj, &lsblk)
+	check(err)
+	return lsblk
+}
+
+// GetLsblkOutput .
+func GetLsblkOutput() []byte {
 	lsblkj, err := exec.Command("lsblk", "-pabOJ").Output()
 	check(err)
-	err = json.Unmarshal(lsblkj, &lsblk)
-	return lsblk
+	return lsblkj
 }

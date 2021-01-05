@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"reflect"
 )
 
 // Lsblk main JSON struct to capture the output of `lsblk`
@@ -18,8 +19,8 @@ type Blockdevice struct {
 	Pkname       string      // internal parent kernel device name
 	Path         string      // path to the device node
 	MajMin       string      `json:"maj:min"` // major:minor device number
-	Fsavail      json.Number // filesystem size available
-	Fssize       json.Number // filesystem size in bytes
+	Fsavail      Num         // filesystem size available
+	Fssize       Num         // filesystem size in bytes
 	Fstype       string      // filesystem type
 	Fsused       string      // filesystem size used
 	Fsusep       string      `json:"fsuse%"` // filesystem use percentage
@@ -34,7 +35,7 @@ type Blockdevice struct {
 	Partlabel    string      // partition LABEL
 	Partuuid     string      // partition UUID
 	Partflags    string      // partition flags
-	Ra           json.Number // read-ahead of the device
+	Ra           json.Number // read-ahead of the devic
 	Ro           bool        // read-only device
 	Rm           bool        // removable device
 	Hotplug      bool        // removable or hotplug device (usb, pcmcia, ...)
@@ -42,7 +43,7 @@ type Blockdevice struct {
 	Rand         bool        // adds randomness
 	Model        string      // device identifier
 	Serial       string      // disk serial number
-	Size         json.Number // size of the device in bytes
+	Size         Num         // size of the device in bytes
 	State        string      // state of the device e.g. suspended, running, live
 	Owner        string      // user name
 	Group        string      // group name
@@ -69,6 +70,75 @@ type Blockdevice struct {
 	Zoned        string      // zone model
 	Dax          bool        // dax-capable device
 	Children     []Blockdevice
+	// HumanReadableSize func(j *json.Number)
+}
+
+// Num custom field with string, int64 & HumanReadable K,M,Gb conversion of bytes
+type Num struct {
+	Int64         int64
+	String        string
+	HumanReadable string
+}
+
+// UnmarshalJSON custom marshaling of the JSON fields
+func (b *Blockdevice) UnmarshalJSON(data []byte) error {
+	type Alias Blockdevice
+	aux := &struct {
+		Fsavail json.Number
+		Fssize  json.Number
+		Size    json.Number
+		*Alias
+	}{
+		Alias: (*Alias)(b),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	var a Num
+	reflA := reflect.ValueOf(&aux).Elem().Elem()
+	reflB := reflect.ValueOf(&b).Elem().Elem()
+	for _, fname := range []string{"Size", "Fssize", "Fsavail"} {
+		if reflA.FieldByName(fname).Interface().(json.Number).String() != "" {
+			i, _ := reflA.FieldByName(fname).Interface().(json.Number).Int64()
+			s := reflA.FieldByName(fname).Interface().(json.Number).String()
+			a.HumanReadable = ByteCountSI(i)
+			a.Int64 = i
+			a.String = s
+			reflB.FieldByName(fname).Set(reflect.ValueOf(a))
+		}
+	}
+
+	// if aux.Size != "" {
+	// 	i, err := aux.Size.Int64()
+	// 	check(err)
+	// 	a.HumanReadable = ByteCountSI(i)
+	// 	a.Int64 = i
+	// 	s := aux.Size.String()
+	// 	a.String = s
+	// 	b.Size = a
+	// }
+	// if aux.Fssize != "" {
+	// 	i, err := aux.Fssize.Int64()
+	// 	check(err)
+	// 	a.HumanReadable = ByteCountSI(i)
+	// 	a.Int64 = i
+	// 	s := aux.Fssize.String()
+	// 	a.String = s
+	// 	b.Fssize = a
+	// }
+
+	// if aux.Fsavail != "" {
+	// 	i, err := aux.Fsavail.Int64()
+	// 	check(err)
+	// 	a.HumanReadable = ByteCountSI(i)
+	// 	a.Int64 = i
+	// 	s := aux.Fsavail.String()
+	// 	a.String = s
+	// 	b.Fsavail = a
+	// }
+	return nil
 }
 
 func check(e error) {
@@ -79,13 +149,8 @@ func check(e error) {
 
 // Utilities: START
 
-func compareJSONNumbers(o, n json.Number) bool {
-	ofs, e := o.Int64()
-	check(e)
-	nfs, e := n.Int64()
-	check(e)
-	fmt.Println(ofs, nfs)
-	if nfs > ofs {
+func compareJSONNumbers(o, n Num) bool {
+	if n.Int64 > o.Int64 {
 		return true
 	}
 	return false
@@ -123,6 +188,11 @@ func ByteCountIEC(b int64) string {
 
 // Utilities: END
 
+// JSONNumber extended
+// type extended JSONNumber struct {
+// json.Number
+// }
+
 // HasPartitions checks if blockdevice has partitions
 func (b Blockdevice) HasPartitions() bool {
 	if len(b.Children) > 0 {
@@ -156,25 +226,25 @@ func (b Blockdevice) IsUsbTran() bool {
 }
 
 // USBMountedPartitionWithLargestAvailableSpace .
-func USBMountedPartitionWithLargestAvailableSpace() Blockdevice {
-	var partition Blockdevice
-	partition.Fsavail = "0"
-	for _, m := range USBMountedPartitions() {
-		if m.Fsavail != "" {
-			if compareJSONNumbers(partition.Fsavail, m.Fsavail) {
-				partition = m
-			}
-		}
-	}
-	return partition
-}
+// func USBMountedPartitionWithLargestAvailableSpace() Blockdevice {
+// 	var partition Blockdevice
+// 	partition.Fsavail = "0"
+// 	for _, m := range USBMountedPartitions() {
+// 		if m.Fsavail != "" {
+// 			if compareJSONNumbers(partition.Fsavail, m.Fsavail) {
+// 				partition = m
+// 			}
+// 		}
+// 	}
+// 	return partition
+// }
 
 // USBNotMountedPartitionOfLargestSize .
 func USBNotMountedPartitionOfLargestSize() Blockdevice {
 	var partition Blockdevice
-	partition.Size = "0"
-	for _, m := range USBMountedPartitions() {
-		if m.Size != "" {
+	partition.Size.Int64 = 0
+	for _, m := range USBNotMountedPartitions() {
+		if m.Size.Int64 != 0 {
 			if compareJSONNumbers(partition.Size, m.Size) {
 				partition = m
 			}

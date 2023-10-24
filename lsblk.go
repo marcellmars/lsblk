@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"reflect"
+	"strconv"
+	"strings"
 )
 
 // Lsblk main JSON struct to capture the output of `lsblk`
@@ -138,6 +140,26 @@ func (b *Blockdevice) UnmarshalJSON(data []byte) error {
 	// 	a.String = s
 	// 	b.Fsavail = a
 	// }
+	return nil
+}
+
+// Bool custom field deal with string, int and bool value
+type Bool bool
+
+// UnmarshalJSON custom marshaling of the JSON fields
+func (b *Bool) UnmarshalJSON(data []byte) (err error) {
+	switch str := strings.ToLower(strings.Trim(string(data), `"`)); str {
+	case "true":
+		*b = true
+	case "false":
+		*b = false
+	default:
+		val, err := strconv.ParseInt(str, 10, 64)
+		if err != nil {
+			return err
+		}
+		*b = val > 0
+	}
 	return nil
 }
 

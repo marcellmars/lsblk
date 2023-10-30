@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"reflect"
+	"strconv"
+	"strings"
 )
 
 // Lsblk main JSON struct to capture the output of `lsblk`
@@ -36,11 +38,11 @@ type Blockdevice struct {
 	Partuuid     string      // partition UUID
 	Partflags    string      // partition flags
 	Ra           json.Number // read-ahead of the devic
-	Ro           bool        // read-only device
-	Rm           bool        // removable device
-	Hotplug      bool        // removable or hotplug device (usb, pcmcia, ...)
-	Rota         bool        // rotational device
-	Rand         bool        // adds randomness
+	Ro           Bool        // read-only device
+	Rm           Bool        // removable device
+	Hotplug      Bool        // removable or hotplug device (usb, pcmcia, ...)
+	Rota         Bool        // rotational device
+	Rand         Bool        // adds randomness
 	Model        string      // device identifier
 	Serial       string      // disk serial number
 	Size         Num         // size of the device in bytes
@@ -59,7 +61,7 @@ type Blockdevice struct {
 	Discaln      json.Number `json:"disc-aln"`  // discard alignment offset
 	Discgran     json.Number `json:"disc-gran"` // discard granularity
 	Discmax      json.Number `json:"disc-max"`  // discard max bytes
-	Disczero     bool        `json:"disc-zero"` // discard zeroes data
+	Disczero     Bool        `json:"disc-zero"` // discard zeroes data
 	Wsame        json.Number // write same max bytes
 	Wwn          string      // unique storage identifier
 	Hctl         string      // Host:Channel:Target:Lun for SCSI
@@ -68,7 +70,7 @@ type Blockdevice struct {
 	Rev          string      // device revision
 	Vendor       string      // device vendor
 	Zoned        string      // zone model
-	Dax          bool        // dax-capable device
+	Dax          Bool        // dax-capable device
 	Children     []Blockdevice
 	// HumanReadableSize func(j *json.Number)
 }
@@ -138,6 +140,26 @@ func (b *Blockdevice) UnmarshalJSON(data []byte) error {
 	// 	a.String = s
 	// 	b.Fsavail = a
 	// }
+	return nil
+}
+
+// Bool custom field deal with string, int and bool value
+type Bool bool
+
+// UnmarshalJSON custom marshaling of the JSON fields
+func (b *Bool) UnmarshalJSON(data []byte) (err error) {
+	switch str := strings.ToLower(strings.Trim(string(data), `"`)); str {
+	case "true":
+		*b = true
+	case "false":
+		*b = false
+	default:
+		val, err := strconv.ParseInt(str, 10, 64)
+		if err != nil {
+			return err
+		}
+		*b = val > 0
+	}
 	return nil
 }
 
